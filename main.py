@@ -1,7 +1,12 @@
 from TAQ import TAQ
+import pandas as pd
 
 def main():
-    taq = TAQ('QQQ1HourTemp.csv')
+    d = pd.read_csv('QQQ1day.csv')
+    taq = TAQ(data=d)
+    print(taq.data.head(-10))
+
+
 
 
 

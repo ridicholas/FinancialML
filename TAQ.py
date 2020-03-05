@@ -7,13 +7,28 @@ class TAQ():
     """TAQ object generated from WRDS database TAQ trade csv file.
     Stores initial CSV as pd dataframe and renames columns"""
 
-    def __init__(self, path):
-        self.taqPath = path
-        self.taqData = pd.read_csv(path)
+    def __init__(self, path='null', data=None):
+        if path != 'null':
+            self.taqPath = path
+            self.rawData = pd.read_csv(path)
+        elif data is not None:
+            self.rawData = data
+
+        self.data = self.preprocess()
+
+    def make_timestamp(self, level = 'Min'):
+        combined = self.rawData['DATE'].apply(str) + ' ' + self.rawData['TIME_M']
+        timestamp = pd.to_datetime(combined)
+        return timestamp.dt.floor(level)
+
+    def preprocess(self, level = 'Min'):
+        data = self.rawData[['SYM_ROOT', 'EX', 'SIZE', 'PRICE']]
+        data = data.rename(columns={"SYM_ROOT": "ticker", "EX": 'exchange', "SIZE" : 'volume', "PRICE": 'price'})
+        data['timestamp'] = self.make_timestamp(level)
+        data['date'] = data['timestamp'].dt.date
+        return data
 
 
-    def preprocess(self):
-        print('hello')
 
 
 
