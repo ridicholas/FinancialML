@@ -12,7 +12,8 @@ class TAQ():
         self.taqData = pd.read_csv(path)
 
 
-    def
+    def preprocess(self):
+        print('hello')
 
 
 
