@@ -4,7 +4,7 @@ import pandas as pd
 def main():
     d = pd.read_csv('QQQ1day.csv')
     taq = TAQ(data=d)
-    print(taq.timeBars.head(-10))
+    print(taq.data.head(-10))
 
 
 

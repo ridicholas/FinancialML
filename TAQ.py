@@ -28,7 +28,10 @@ class TAQ():
         data['priceXvolume'] = data['price'] * data['volume']
         data['timestamp'] = self.make_timestamp(level)
         data['date'] = data['timestamp'].dt.date
+        data['ticks'] = (data['price'].diff()/abs(data['price'].diff())).fillna(method = 'ffill').fillna(1)
         return data
+
+
 
     def makeTimeBars(self):
         """Will create TimeBars using level specified in pre-processing"""
