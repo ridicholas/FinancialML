@@ -22,9 +22,11 @@ class TAQ():
 
         self.data = self.preprocess()
         self.timeBars = self.makeTimeBars()
+
         self.Ts, self.abs_thetas, self.thresholds, self.i_s = self.compute_Ts(self.data.ticks,
-                                                                         2000,
-                                                                         abs(self.data.ticks.mean()))
+                                                                              2000,
+                                                                              abs(self.data.ticks.mean()))
+
 
     def make_timestamp(self, level = 'Min'):
         combined = self.rawData['DATE'].apply(str) + ' ' + self.rawData['TIME_M']
@@ -72,30 +74,57 @@ class TAQ():
             mpf.plot(plotData, type='candle', volume = volume)
         plt.show()
 
-    def compute_Ts(self, bvs, E_T_init, abs_Ebv_init):
-        Ts, i_s = [], []
-        i_prev, E_T, abs_Ebv = 0, E_T_init, abs_Ebv_init
+    def identifyImbalanceIndexes(self, ticker, ET_init):
+        ET = ET_init
+        ticker = self.data[self.data.ticker == ticker]
+        ticks = ticker.ticks * ticker.volume
 
-        n = bvs.shape[0]
-        bvs_val = bvs.values.astype(np.float64)
-        abs_thetas, thresholds = np.zeros(n), np.zeros(n)
-        abs_thetas[0], cur_theta = np.abs(bvs_val[0]), bvs_val[0]
-        for i in range(1, n):
-            cur_theta += bvs_val[i]
-            abs_theta = np.abs(cur_theta)
-            abs_thetas[i] = abs_theta
+        Eimbalance = abs(ticks.mean())
+        thetas = ticks.cumsum()
+        abs_thetas = np.abs(thetas)
+        final_abs_thetas = abs_thetas.copy(deep=True)
+        n = ticks.shape[0]
 
-            threshold = E_T * abs_Ebv
-            thresholds[i] = threshold
+        T = []
+        i_s = [0]
+        imbalances = []
+        thresholds = []
+        thresholds.append(ET * Eimbalance)
 
-            if abs_theta >= threshold:
-                cur_theta = 0
-                Ts.append(np.float64(i - i_prev))
-                i_s.append(i)
-                i_prev = i
-                E_T = _ewma(np.array(Ts), window=np.int64(len(Ts)))[-1]
-                abs_Ebv = np.abs(_ewma(bvs_val[:i], window=np.int64(E_T_init * 3))[-1])  # window of 3 bars
-        return Ts, abs_thetas, thresholds, i_s
+        i = 0
+        while i < n:
+            barBools = abs_thetas < thresholds[-1]
+            if sum(barBools) == n:
+                break
+            i = barBools[barBools == False].index[0]
+            imbalances.append(abs(ticks[i_s[-1]:i].mean()))
+            if len(T) > 0:
+                T.append(i - i_s[-1])
+            else:
+                T.append(i)
+
+            abs_thetas[i_s[-1]:i] = 0
+
+            abs_thetas[i:] = abs_thetas[i:] - abs_thetas[i]
+
+            abs_thetas = abs(abs_thetas)
+            final_abs_thetas[i:] = abs_thetas[i:]
+            i_s.append(i)
+            ET = pd.Series(T).ewm(com=0.1).mean().iloc[-1]
+            Eimbalance = pd.Series(imbalances).ewm(com=0.1).mean().iloc[-1]
+            thresholds.append(ET * Eimbalance)
+
+
+        return T, i_s, imbalances, final_abs_thetas, thresholds
+
+
+
+
+
+
+
+
+
 
 
 
