@@ -23,11 +23,6 @@ class TAQ():
         self.data = self.preprocess()
         self.timeBars = self.makeTimeBars()
 
-        self.Ts, self.abs_thetas, self.thresholds, self.i_s = self.compute_Ts(self.data.ticks,
-                                                                              2000,
-                                                                              abs(self.data.ticks.mean()))
-
-
     def make_timestamp(self, level = 'Min'):
         combined = self.rawData['DATE'].apply(str) + ' ' + self.rawData['TIME_M']
         timestamp = pd.to_datetime(combined)
@@ -77,7 +72,7 @@ class TAQ():
     def identifyImbalanceIndexes(self, ticker, ET_init):
         ET = ET_init
         ticker = self.data[self.data.ticker == ticker]
-        ticks = ticker.ticks * ticker.volume
+        ticks = ticker.ticks * ticker.volume * ticker.price
 
         Eimbalance = abs(ticks.mean())
         thetas = ticks.cumsum()
@@ -89,7 +84,8 @@ class TAQ():
         i_s = [0]
         imbalances = []
         thresholds = []
-        thresholds.append(ET * Eimbalance)
+        startThreshold = ET*Eimbalance
+        thresholds.append(startThreshold)
 
         i = 0
         while i < n:
@@ -105,17 +101,21 @@ class TAQ():
 
             abs_thetas[i_s[-1]:i] = 0
 
-            abs_thetas[i:] = abs_thetas[i:] - abs_thetas[i]
+            abs_thetas[i:] = thetas[i:] - thetas[i]
 
             abs_thetas = abs(abs_thetas)
             final_abs_thetas[i:] = abs_thetas[i:]
             i_s.append(i)
-            ET = pd.Series(T).ewm(com=0.1).mean().iloc[-1]
-            Eimbalance = pd.Series(imbalances).ewm(com=0.1).mean().iloc[-1]
+            ET = pd.Series(T[max(-3, -len(T)):]).ewm(com=0.8).mean().iloc[-1]
+            Eimbalance = pd.Series(imbalances[max(-3, -len(imbalances)):]).ewm(com=0.8).mean().iloc[-1]
+
             thresholds.append(ET * Eimbalance)
 
 
-        return T, i_s, imbalances, final_abs_thetas, thresholds
+
+
+
+        return T, i_s, imbalances, final_abs_thetas, thresholds, thetas
 
 
 
