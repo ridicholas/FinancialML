@@ -13,11 +13,13 @@ def main():
     #print(taq.data.groups)
     #print(taq.timeBars.index)
     #print(taq.groupBars.index)
-    taq.candlePlot(mav=4, volume=True)
-    taq.candlePlot(type = 'group', mav=4, volume=True)
+    #taq.candlePlot(mav=4, volume=True)
+    #taq.candlePlot(type = 'group', mav=4, volume=True)
     print('this took ' + str(time.time() - now) + ' seconds')
-
-    taq.fixedTimeLabel(2)
+    now=time.time()
+    #taq.fixedTimeLabel(2)
+    taq.tripleBarrierLabel(100)
+    print('and this took: ' + str(time.time() - now) + ' seconds')
 
 
 

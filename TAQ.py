@@ -279,16 +279,49 @@ class TAQ():
         return T, i_s, imbalances, final_abs_thetas, thresholds, thetas, ticks
 
 
-    def fixedTimeLabel(self, numBars):
-        returns = self.groupBars.VWAP
+    def fixedTimeLabel(self, numBars, type = 'time'):
+        if type == 'group':
+            returns = self.groupBars.VWAP
+        else:
+            returns = self.timeBars.VWAP
         print(returns)
         returns = -returns.diff(periods=-numBars)/returns
         tau = returns.std()
         returns[returns > tau] = 1
         returns[returns < -tau] = -1
-        returns[(returns > -tau) & (returns < 2*tau)] = 0
+        returns[(returns > -tau) & (returns < tau)] = 0
 
-        print(returns)
+        return returns
+
+    def tripleBarrierLabel(self, numBars, upper=3, lower=2, type='time'):
+        if type == 'group':
+            returns = self.groupBars.VWAP.copy(deep=True)
+        else:
+            returns = self.timeBars.VWAP.copy(deep=True)
+
+        tau = returns.std()
+        returns = pd.DataFrame(returns)
+        for i in range(1, numBars+1):
+            label = 'shifted: ' + str(i)
+            returns[label] = -returns.VWAP.diff(periods=-i)
+
+        shifts = returns.copy(deep=True)
+        shifts.VWAP = 0
+        shifts = (shifts > upper*tau) | (shifts < -lower*tau)
+        shifts[label] = True
+        shifts = shifts.cumsum(axis=1)
+        shifts = shifts.cumsum(axis=1)
+        shifts[shifts != 1] = 0
+        returns[shifts != 1] = 0
+        label = returns.sum(axis=1)
+
+
+        print(shifts)
+        print(label)
+
+
+
+
 
 
 
