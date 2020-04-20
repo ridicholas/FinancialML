@@ -4,6 +4,8 @@ import sklearn
 import datetime
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+from scipy import stats
+import random
 
 
 
@@ -11,7 +13,7 @@ class TAQ():
     """TAQ object generated from WRDS database TAQ trade csv file.
     Stores initial CSV as pd dataframe and renames columns"""
 
-    def __init__(self, path='null', data=None, ticker = None):
+    def __init__(self, path='null', data=None, ticker = None, rm_outliers = False):
 
         if path != 'null':
             self.taqPath = path
@@ -27,10 +29,17 @@ class TAQ():
 
 
         self.data = self.preprocess()
+        self.rm_outliers = rm_outliers
+        if rm_outliers:
+            tempTicks = self.data.price * self.data.volume
+            z = np.abs(stats.zscore(tempTicks))
+            self.data = self.data[z < 3].reset_index(drop=True)
+
+
         self.timeBars = self.makeBars()
         self.groupBars = None
 
-    def makeGroup(self, func, ET_init, type = 'dollar', wordy = False, plotty = False):
+    def makeGroup(self, func, ET_init=0, type = 'dollar', wordy = False, plotty = False):
         Ts, i_s, imbalances, abs_thetas, thresh, thetas, ticks = func(ET_init, type)
 
         #show results
@@ -76,16 +85,16 @@ class TAQ():
         self.groupBars = self.makeBars(group=True)
 
 
-    def make_timestamp(self, level = 'Min'):
+    def make_timestamp(self):
         combined = self.rawData['DATE'].apply(str) + ' ' + self.rawData['TIME_M']
         timestamp = pd.to_datetime(combined)
-        return timestamp.dt.floor(level)
+        return timestamp
 
-    def preprocess(self, level = 'Min'):
+    def preprocess(self):
         data = self.rawData[['SYM_ROOT', 'EX', 'SIZE', 'PRICE']]
         data = data.rename(columns={"SYM_ROOT": "ticker", "EX": 'exchange', "SIZE" : 'volume', "PRICE": 'price'})
         data['priceXvolume'] = data['price'] * data['volume']
-        data['timestamp'] = self.make_timestamp(level)
+        data['timestamp'] = self.make_timestamp()
         data['date'] = data['timestamp'].dt.date
         ticks = data['price'].diff()/abs(data['price'].diff())
         newSym = data['ticker'].ne(data['ticker'].shift(1))
@@ -98,15 +107,18 @@ class TAQ():
 
 
 
-    def makeBars(self, group = False):
+    def makeBars(self, group = False, timelevel = 'min'):
         """Will create TimeBars using level specified in pre-processing"""
+        groupData=self.data.copy(deep=True)
+        groupData['oTimestamp'] = groupData.timestamp.copy(deep=True)
         if group == True:
             if self.data.groups.sum() > 0:
-                groupData = self.data.groupby(['ticker', 'groups'])
+                groupData = groupData.groupby(['ticker', 'groups'])
             else:
                 print('there are no groups to groupby')
         else:
-            groupData = self.data.groupby(['ticker', 'timestamp'])
+            groupData.timestamp = groupData.timestamp.dt.floor(timelevel)
+            groupData = groupData.groupby(['ticker', 'timestamp'])
         volsum = groupData['volume'].sum()
         psum = groupData['priceXvolume'].sum()
         vwap = psum / volsum
@@ -114,17 +126,22 @@ class TAQ():
         c = groupData['price'].last()
         high = groupData['price'].max()
         low = groupData['price'].min()
-        startTime = groupData['timestamp'].first()
-        endTime = groupData['timestamp'].last()
+        startTime = groupData['oTimestamp'].first()
+        endTime = groupData['oTimestamp'].last()
         frame = {'Volume': volsum,
                  'VWAP': vwap,
                  'Open': o,
                  'Close': c,
                  'High': high,
                  'Low': low,
+                 'movement': c-o,
+                 'range': high-low,
                  'numTicks': groupData['price'].count(),
                  'startTime': startTime,
-                 'endTime': endTime}
+                 'endTime': endTime,
+                 'elapsedTime': (endTime-startTime).dt.total_seconds(),
+                 'startDayOfWeek': startTime.dt.dayofweek,
+                 'sameDay': endTime.dt.dayofweek == startTime.dt.dayofweek}
 
 
         frame = pd.DataFrame(frame)
@@ -147,6 +164,18 @@ class TAQ():
             mpf.plot(plotData, type = 'candle', mav = mav, volume = volume)
         else:
             mpf.plot(plotData, type='candle', volume = volume)
+        plt.show()
+
+    def linePlot(self, type = 'time', start = None, end = None):
+        plt.figure(figsize=(45,15))
+        if type == 'group':
+            plotData = self.groupBars.droplevel(axis = 0, level = 0)
+        else:
+            plotData = self.timeBars.droplevel(axis = 0, level = 0)
+        if start and end:
+            plotData = plotData.loc[start:end, :]
+
+        mpf.plot(plotData, type = 'line')
         plt.show()
 
     def identifyImbalanceIndexes(self, ET_init, type = 'dollar'):
@@ -196,18 +225,23 @@ class TAQ():
             abs_thetas = abs(abs_thetas)
             final_abs_thetas[i:] = abs_thetas[i:]
             i_s.append(i)
-            ET = pd.Series(T).ewm(com=0.1).mean().iloc[-1]
+            ET = pd.Series(T).ewm(com=0.5).mean().iloc[-1]
 
-            Eimbalance = pd.Series(imbalances).ewm(com=0.1).mean().iloc[-1]
+            Eimbalance = pd.Series(imbalances).ewm(com=0.5).mean().iloc[-1]
             thresholds.append(ET * Eimbalance)
 
         return T, i_s, imbalances, final_abs_thetas, thresholds, thetas, ticks
 
 
 
-    def identifyRunsIndexes(self, ET_init, type = 'dollar'):
-        ET = ET_init
-        ticker = self.data
+    def identifyRunsIndexes(self, ET_init = 0,type = 'dollar'):
+        if ET_init == 0:
+            ET = self.data.shape[0]*0.01
+        else:
+            ET = ET_init
+        ticker = self.data.copy(deep=True)
+
+
 
         if type == 'tick':
             ticks = ticker.ticks
@@ -216,7 +250,11 @@ class TAQ():
         else:
             ticks = ticker.ticks * ticker.volume * ticker.price
 
-
+        n = ticks.shape[0]
+        if not self.rm_outliers:
+            z = np.abs(stats.zscore(ticks))
+            outliers = ticks[z>=3]
+            ticks = ticks[z<3].reset_index(drop=True)
         posticks = ticks.copy(deep=True)
         posticks[posticks < 0] = 0
         negticks = ticks.copy(deep=True)
@@ -224,36 +262,39 @@ class TAQ():
         df = pd.DataFrame({"pos": posticks.cumsum(), "neg": -negticks.cumsum()})
         thetas = df[["pos","neg"]].max(axis=1)
         abs_thetas = abs(thetas)
-        Eimbalance = max(posticks[0:ET_init][posticks < posticks[0:ET_init].quantile(.99)].mean(),abs(negticks[0:ET_init][negticks > negticks[0:ET_init].quantile(.01)].mean()))
+        Eimbalance = max(posticks.mean(),abs(negticks.mean()))
         final_abs_thetas = abs_thetas.copy(deep=True)
-        n = ticks.shape[0]
         T = []
         i_s = [0]
         imbalances = []
         thresholds = []
         startThreshold = ET*Eimbalance
-        thresholds.append(startThreshold)
+
 
 
         i = 0
+
+
         while i < n:
-            barBools = abs_thetas >= thresholds[-1]
+
+            '''  pd.Series(T[-3:-1]).ewm(com=0.5).mean().iloc[-1] * pd.Series(imbalances[-3:-1]).ewm(com=0.5).mean().iloc[-1]'''
+            if sum(T) > ET_init and len(T) >= 3:
+                barBools = (abs_thetas >= pd.Series(thresholds[-3:-1]).ewm(com=0.5).mean().iloc[-1])
+
+            else:
+                barBools = (abs_thetas >= startThreshold)
             if sum(barBools) == 0:
                 T.append(i - i_s[-1])
                 i_s.append(n)
                 imbalances.append(max(posticks[i_s[-1]:i].mean(),abs(negticks[i_s[-1]:i].mean())))
                 break
-            i = barBools[barBools == True].index[1]
+            i = barBools[barBools == True].index[0]+random.randint(0,1)
+
+
+
             imbalances.append(max(posticks[i_s[-1]:i].mean(),abs(negticks[i_s[-1]:i].mean())))
             T.append(i - i_s[-1])
-            if len(imbalances) >= 2 and imbalances[-1] > imbalances[-2]*5:
-                imbalances[-1] = imbalances[-2]
-                #if T[-1] < T[-2]/3.5:
-                T[-1] = T[-2]
-            elif len(imbalances) == 1 and imbalances[0] > Eimbalance*5:
-                imbalances[0] = Eimbalance
-                #if T[0] < ET_init/3.5:
-                T[0] = ET_init
+
 
 
 
@@ -267,14 +308,17 @@ class TAQ():
             final_abs_thetas[i:] = abs_thetas[i:]
             i_s.append(i)
 
-            if sum(T) > ET_init:
-                ET = pd.Series(T).ewm(com=0.1).mean().iloc[-1]
-                Eimbalance = pd.Series(imbalances).ewm(com=0.1).mean().iloc[-1]
 
-
-
-            thresholds.append(ET * Eimbalance)
+            thresholds.append(T[-1]*imbalances[-1])
             #print("T: " + str(T[-1]) + ", imbalance: " + str(imbalances[-1])+ ", Threshold: " + str(thresholds[-1]))
+
+        if not self.rm_outliers:
+            for index in outliers.index:
+                if index not in i_s:
+                    i_s.append(index)
+                i_s.append(index+1)
+            i_s.sort()
+
 
         return T, i_s, imbalances, final_abs_thetas, thresholds, thetas, ticks
 
@@ -285,39 +329,57 @@ class TAQ():
         else:
             returns = self.timeBars.VWAP
         print(returns)
+
         returns = -returns.diff(periods=-numBars)/returns
         tau = returns.std()
+
+        returns[(returns > -tau) & (returns < tau)] = 0
         returns[returns > tau] = 1
         returns[returns < -tau] = -1
-        returns[(returns > -tau) & (returns < tau)] = 0
+
 
         return returns
 
     def tripleBarrierLabel(self, numBars, upper=3, lower=2, type='time'):
+
+
         if type == 'group':
             returns = self.groupBars.VWAP.copy(deep=True)
+            highs = self.groupBars.High.copy(deep=True)
+            lows = self.groupBars.Low.copy(deep=True)
         else:
             returns = self.timeBars.VWAP.copy(deep=True)
+            highs = self.timeBars.High.copy(deep=True)
+            lows = self.timeBars.Low.copy(deep=True)
 
-        tau = returns.std()
+
         returns = pd.DataFrame(returns)
+        highs = pd.DataFrame(highs)
+        lows = pd.DataFrame(lows)
         for i in range(1, numBars+1):
             label = 'shifted: ' + str(i)
-            returns[label] = -returns.VWAP.diff(periods=-i)
+            returns[label] = -returns.VWAP.diff(periods=-i)/returns.VWAP
+            highs[label] = (highs.High.shift(periods=-i)-returns.VWAP)/returns.VWAP
+            lows[label] = (lows.Low.shift(periods=-i)-returns.VWAP)/returns.VWAP
 
+        tau = returns.drop('VWAP', axis = 1).std()[-1]
         shifts = returns.copy(deep=True)
-        shifts.VWAP = 0
-        shifts = (shifts > upper*tau) | (shifts < -lower*tau)
+        shifts = shifts.drop('VWAP', axis = 1)
+        highs = highs.drop('High', axis = 1)
+        lows = lows.drop('Low', axis=1)
+        shifts = (highs.gt(upper*tau, axis = 1)) | (lows.lt(-lower*tau, axis = 1))
         shifts[label] = True
         shifts = shifts.cumsum(axis=1)
         shifts = shifts.cumsum(axis=1)
-        shifts[shifts != 1] = 0
         returns[shifts != 1] = 0
+        returns.VWAP=0
         label = returns.sum(axis=1)
+        label[(label > -tau) & (label < tau)] = 0
+        label[label > tau] = 1
+        label[label < -tau] = -1
 
 
-        print(shifts)
-        print(label)
+        return label
 
 
 
