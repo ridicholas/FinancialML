@@ -17,7 +17,7 @@ def main():
     #stuff = taq.data.ticks*taq.data.volume*taq.data.price
     #stuff.plot.kde()
     #plt.show()
-    taq.makeGroup(taq.identifyRunsIndexes, type='dollar', wordy = False, plotty=False)
+    taq.makeGroup(taq.identifyRunsIndexes, type='dollar', wordy = False, plotty=False, rm_outliers = True)
     #print(taq.data.groups)
     #print(taq.timeBars.index)
     #print(taq.groupBars.index)
