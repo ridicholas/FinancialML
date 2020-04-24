@@ -29,7 +29,7 @@ class TAQ():
         self.data = self.preprocess()
         self.rm_outliers = rm_outliers
         if self.rm_outliers:
-            self.data = self.data[self.data.volume < self.data.volume.quantile(.99999)].reset_index(drop=True)
+            self.data = self.data[self.data.volume < self.data.volume.quantile(.999)].reset_index(drop=True)
 
         self.timeBars = self.makeBars()
         self.groupBars = None
@@ -65,7 +65,6 @@ class TAQ():
             plt.title('Dollar Cumulative Sum Over Time')
             plt.ylabel('Cumulative Dollars')
             plt.xlabel('Index')
-
             plt.show()
 
         prev_i = 0
@@ -167,56 +166,6 @@ class TAQ():
         mpf.plot(plotData, type='line')
         plt.show()
 
-    def identifyImbalanceIndexes(self, ET_init, type='dollar'):
-        ET = ET_init
-        ticker = self.data
-
-        if type == 'tick':
-            ticks = ticker.ticks
-        elif type == 'volume':
-            ticks = ticker.ticks * ticker.volume
-        else:
-            ticks = ticker.ticks * ticker.volume * ticker.price
-
-        Eimbalance = abs(ticks.mean())
-        thetas = ticks.cumsum()
-        abs_thetas = np.abs(thetas)
-        final_abs_thetas = abs_thetas.copy(deep=True)
-        n = ticks.shape[0]
-
-        T = []
-        i_s = [0]
-        imbalances = []
-        thresholds = []
-        startThreshold = ET * Eimbalance
-        thresholds.append(startThreshold)
-
-        i = 0
-        while i < n:
-            barBools = abs_thetas >= thresholds[-1]
-            if sum(barBools) == 0:
-                T.append(n - i_s[-1])
-                i_s.append(n)
-                imbalances.append(abs(ticks[i_s[-1]:i].mean()))
-                break
-            i = barBools[barBools == True].index[0] + 1
-            imbalances.append(abs(ticks[i_s[-1]:i].mean()))
-
-            T.append(i - i_s[-1])
-
-            abs_thetas[i - 1:] = thetas[i - 1:] - thetas[i - 1]
-            abs_thetas[i_s[-1]:i] = 0
-
-            abs_thetas = abs(abs_thetas)
-            final_abs_thetas[i:] = abs_thetas[i:]
-            i_s.append(i)
-            ET = pd.Series(T).ewm(com=0.5).mean().iloc[-1]
-
-            Eimbalance = pd.Series(imbalances).ewm(com=0.5).mean().iloc[-1]
-            thresholds.append(ET * Eimbalance)
-
-        return T, i_s, imbalances, final_abs_thetas, thresholds, thetas, ticks
-
     def identifyRunsIndexes(self, ET_init=0, type='dollar', rm_outs=True):
         if ET_init == 0:
             ET_init = self.data.shape[0] * 0.01
@@ -232,9 +181,9 @@ class TAQ():
             ticks = ticker.ticks * ticker.volume * ticker.price
 
         n = ticks.shape[0]
-        outliers = ticks[abs(ticks) >= abs(ticks).quantile(.99999)]
+        outliers = ticks[abs(ticks) >= abs(ticks).quantile(n/(n+5))]
         if rm_outs:
-            ticks = ticks[abs(ticks) < abs(ticks).quantile(.99999)].reset_index(drop=True)
+            ticks = ticks[abs(ticks) < abs(ticks).quantile(n/(n+5))].reset_index(drop=True)
         posticks = ticks.copy(deep=True)
         posticks[posticks < 0] = 0
         negticks = ticks.copy(deep=True)
@@ -254,7 +203,6 @@ class TAQ():
 
         while i < n:
 
-            '''  pd.Series(T[-3:-1]).ewm(com=0.5).mean().iloc[-1] * pd.Series(imbalances[-3:-1]).ewm(com=0.5).mean().iloc[-1]'''
             if len(T) >= 3:
                 barBools = (abs_thetas >= pd.Series(thresholds[-3:-1]).ewm(com=0.5).mean().iloc[-1])
 
@@ -265,7 +213,13 @@ class TAQ():
                 i_s.append(n)
                 imbalances.append(max(posticks[i_s[-1]:i].mean(), abs(negticks[i_s[-1]:i].mean())))
                 break
-            i = barBools[barBools == True].index[0] + random.randint(0, 1)
+
+            if len(imbalances) > 1 and max(posticks[i_s[-1]:barBools[barBools == True].index[0]].mean(),
+                   abs(negticks[i_s[-1]:barBools[barBools == True].index[0]].mean())) > imbalances[-1]:
+                i = barBools[barBools == True].index[0]
+            else:
+                i = barBools[barBools == True].index[0] + 1
+
 
             imbalances.append(max(posticks[i_s[-1]:i].mean(), abs(negticks[i_s[-1]:i].mean())))
             T.append(i - i_s[-1])
